@@ -157,21 +157,40 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         (<?=($msg['direction'] === 'out' ? 'You' : 'Client')?>)
                     </div>
                     <div class="date"><?=htmlspecialchars($msg['received_at'])?></div>
-                    <div class="body" style="margin-top:6px;">
-                        <?php
-                        if (
-                            stripos($msg['body'], '<html') !== false ||
-                            stripos($msg['body'], '<body') !== false ||
-                            stripos($msg['body'], '<div') !== false ||
-                            stripos($msg['body'], '<p') !== false ||
-                            stripos($msg['body'], '<br') !== false
-                        ) {
-                            echo $msg['body'];
-                        } else {
-                            echo nl2br(htmlspecialchars($msg['body']));
-                        }
-                        ?>
-                    </div>
+                    <div class="body">
+<?php
+// Start with the raw body
+$body = $msg['body'];
+
+// If there are attachments with content_id, replace src="cid:..." with the file path
+if (!empty($attachments[$msg['id']])) {
+    foreach ($attachments[$msg['id']] as $a) {
+        if (!empty($a['content_id'])) {
+            $cid = preg_quote($a['content_id'], '/');
+            $body = preg_replace(
+                '/src=(["\'])cid:' . $cid . '\1/i',
+                'src="' . htmlspecialchars($a['file_path']) . '"',
+                $body
+            );
+        }
+    }
+}
+
+// Now render as HTML or plain text as appropriate
+if (
+    stripos($body, '<html') !== false ||
+    stripos($body, '<body') !== false ||
+    stripos($body, '<div') !== false ||
+    stripos($body, '<p') !== false ||
+    stripos($body, '<br') !== false
+) {
+    echo $body;
+} else {
+    echo nl2br(htmlspecialchars($body));
+}
+?>
+</div>
+
                     <?php if (!empty($attachments[$msg['id']])): ?>
                         <div class="attachments">
                             <span class="attach-label">Attachments:</span>

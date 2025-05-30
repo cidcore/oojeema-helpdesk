@@ -108,12 +108,21 @@ function save_attachments_recursive($parts, $inbox, $msgno, $email_id, $upload_d
                 file_put_contents($file_path, $attachment);
 
                 // Save to attachments table
-                $a_stmt = $pdo->prepare("INSERT INTO attachments (email_id, file_name, file_path) VALUES (?, ?, ?)");
-                $a_stmt->execute([
-                    $email_id,
-                    $filename,
-                    $file_path
-                ]);
+                    // Get Content-ID (for inline images)
+                    $content_id = '';
+                    if (isset($part->id)) {
+                        $content_id = trim($part->id, "<>");
+                    }
+
+                    // Save to attachments table (now with content_id column!)
+                    $a_stmt = $pdo->prepare("INSERT INTO attachments (email_id, file_name, file_path, content_id) VALUES (?, ?, ?, ?)");
+                    $a_stmt->execute([
+                        $email_id,
+                        $filename,
+                        $file_path,
+                        $content_id
+                    ]);
+
             }
         }
         // Recurse for sub-parts
