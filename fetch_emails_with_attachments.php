@@ -94,6 +94,8 @@ function save_attachments_recursive($parts, $inbox, $msgno, $email_id, $upload_d
     foreach ($parts as $i => $part) {
         $partnum = $prefix ? $prefix . '.' . ($i+1) : (string)($i+1);
 
+        echo "<pre>Processing partnum $partnum, type={$part->type}, subtype={$part->subtype}</pre>";
+
         // Save all images and attachments with a filename
             if (isset($part->type) && ($part->type == 5 || $part->type == 3 || $part->type == 4)) {
                 $ext = isset($part->subtype) ? strtolower($part->subtype) : 'dat';
@@ -124,10 +126,16 @@ function save_attachments_recursive($parts, $inbox, $msgno, $email_id, $upload_d
 
             }
         }
+        echo "Saving attachment: $filename<br>";
+
         // Recurse for sub-parts
         if (isset($part->parts)) {
             save_attachments_recursive($part->parts, $inbox, $msgno, $email_id, $upload_dir, $pdo, $partnum);
+        
+            echo "Inserted attachment: $filename into DB<br>";
+
         }
+
     //}
 //}
 
