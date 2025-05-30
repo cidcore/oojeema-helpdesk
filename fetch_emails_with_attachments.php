@@ -89,64 +89,57 @@ function get_mail_body($inbox, $msgno, $structure = false, $partNum = '') {
 // ===============
 // ATTACHMENT SAVE
 // ===============
-function save_attachments_recursive($parts, $inbox, $msgno, $email_id, $upload_dir, $pdo, $prefix = '') {
+function save_attachments_recursive($parts, $inbox, $msgno, $email_id, $upload_dir, $pdo, $parent_partnum = '') {
     if (!is_array($parts)) return;
     foreach ($parts as $i => $part) {
-        $partnum = $prefix ? $prefix . '.' . ($i+1) : (string)($i+1);
+        $partnum = $parent_partnum ? $parent_partnum . '.' . ($i+1) : (string)($i+1);
 
-        echo "<pre>Processing partnum $partnum, type={$part->type}, subtype={$part->subtype}</pre>";
+        // Debug: show every part processed
+        echo "<pre>Processing partnum $partnum, type={$part->type}, subtype=" . (isset($part->subtype) ? $part->subtype : '') . "</pre>";
 
-        // Save all images and attachments with a filename
-            if (isset($part->type) && ($part->type == 5 || $part->type == 3 || $part->type == 4)) {
-    $ext = isset($part->subtype) ? strtolower($part->subtype) : 'dat';
-    $filename = 'attachment_' . uniqid() . '.' . $ext;
-    $filename = preg_replace('/[^A-Za-z0-9_\-\.]/', '_', $filename);
+        // Save all images, applications, or audio as attachments
+        if (isset($part->type) && ($part->type == 5 || $part->type == 3 || $part->type == 4)) {
+            $ext = isset($part->subtype) ? strtolower($part->subtype) : 'dat';
+            $filename = 'attachment_' . uniqid() . '.' . $ext;
+            $filename = preg_replace('/[^A-Za-z0-9_\-\.]/', '_', $filename);
 
-    $server_file_path = $upload_dir . $filename;
-    $web_file_path = '/oojeema/uploads/' . $filename;
+            $server_file_path = $upload_dir . $filename;
+            $web_file_path = '/oojeema/uploads/' . $filename;
 
-    $attachment = imap_fetchbody($inbox, $msgno, $partnum);
-    if ($part->encoding == 3) { // BASE64
-        $attachment = base64_decode($attachment);
-    } elseif ($part->encoding == 4) { // QUOTED-PRINTABLE
-        $attachment = quoted_printable_decode($attachment);
-    }
-    if ($attachment && strlen($attachment) > 100) {
-        echo "Saving attachment: $filename<br>";
-        file_put_contents($server_file_path, $attachment);
+            $attachment = imap_fetchbody($inbox, $msgno, $partnum);
+            if ($part->encoding == 3) { // BASE64
+                $attachment = base64_decode($attachment);
+            } elseif ($part->encoding == 4) { // QUOTED-PRINTABLE
+                $attachment = quoted_printable_decode($attachment);
+            }
+            if ($attachment && strlen($attachment) > 100) {
+                echo "Saving attachment: $filename<br>";
+                file_put_contents($server_file_path, $attachment);
 
-        $content_id = '';
-        if (isset($part->id)) {
-            $content_id = trim($part->id, "<>");
-        }
+                // Get Content-ID for inline images
+                $content_id = '';
+                if (isset($part->id)) {
+                    $content_id = trim($part->id, "<>");
+                }
 
-        $a_stmt = $pdo->prepare("INSERT INTO attachments (email_id, file_name, file_path, content_id) VALUES (?, ?, ?, ?)");
-        $a_stmt->execute([
-            $email_id,
-            $filename,
-            $web_file_path,
-            $content_id
-        ]);
-        echo "Inserted attachment: $filename into DB<br>";
-    }
-}
-
-
-
+                // Save to attachments table (web path!)
+                $a_stmt = $pdo->prepare("INSERT INTO attachments (email_id, file_name, file_path, content_id) VALUES (?, ?, ?, ?)");
+                $a_stmt->execute([
+                    $email_id,
+                    $filename,
+                    $web_file_path,
+                    $content_id
+                ]);
+                echo "Inserted attachment: $filename into DB<br>";
             }
         }
-        
 
-        // Recurse for sub-parts
+        // Recurse for subparts (must be outside the save-if block)
         if (isset($part->parts)) {
             save_attachments_recursive($part->parts, $inbox, $msgno, $email_id, $upload_dir, $pdo, $partnum);
-        
-            echo "Inserted attachment: $filename into DB<br>";
-
         }
-
-    //}
-//}
+    }
+}
 
 // ==========
 // MAIN LOGIC
