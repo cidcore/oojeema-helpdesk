@@ -108,7 +108,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             .col-left, .col-right { width: 100%; border:none; padding:24px 12px; }
         }
     </style>
-    <script src="https://cdn.tiny.cloud/1/no-api-key/tinymce/6/tinymce.min.js" referrerpolicy="origin"></script>
+   <script src="https://cdn.tiny.cloud/1/bmc7riaoamwj7tzvfvsdoc9cp045w413zi4g6qan57z98bqd/tinymce/6/tinymce.min.js" referrerpolicy="origin"></script>
+
     <script>
     tinymce.init({
         selector: '#reply_body',
