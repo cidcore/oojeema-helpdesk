@@ -98,35 +98,44 @@ function save_attachments_recursive($parts, $inbox, $msgno, $email_id, $upload_d
 
         // Save all images and attachments with a filename
             if (isset($part->type) && ($part->type == 5 || $part->type == 3 || $part->type == 4)) {
-                $ext = isset($part->subtype) ? strtolower($part->subtype) : 'dat';
-            $filename = 'attachment_' . uniqid() . '.' . $ext;
-            $server_file_path = $upload_dir . $filename;
-            $web_file_path = '/oojeema/uploads/' . $filename;
+    $ext = isset($part->subtype) ? strtolower($part->subtype) : 'dat';
+    $filename = 'attachment_' . uniqid() . '.' . $ext;
+    $filename = preg_replace('/[^A-Za-z0-9_\-\.]/', '_', $filename);
 
-            if ($attachment && strlen($attachment) > 100) {
-                file_put_contents($server_file_path, $attachment);
+    $server_file_path = $upload_dir . $filename;
+    $web_file_path = '/oojeema/uploads/' . $filename;
 
-                $content_id = '';
-                if (isset($part->id)) {
-                    $content_id = trim($part->id, "<>");
-                }
+    $attachment = imap_fetchbody($inbox, $msgno, $partnum);
+    if ($part->encoding == 3) { // BASE64
+        $attachment = base64_decode($attachment);
+    } elseif ($part->encoding == 4) { // QUOTED-PRINTABLE
+        $attachment = quoted_printable_decode($attachment);
+    }
+    if ($attachment && strlen($attachment) > 100) {
+        echo "Saving attachment: $filename<br>";
+        file_put_contents($server_file_path, $attachment);
 
-                $a_stmt = $pdo->prepare("INSERT INTO attachments (email_id, file_name, file_path, content_id) VALUES (?, ?, ?, ?)");
-                $a_stmt->execute([
-                    $email_id,
-                    $filename,
-                    $web_file_path,   // THIS IS THE KEY FIX!
-                    $content_id
-                ]);
-            }
+        $content_id = '';
+        if (isset($part->id)) {
+            $content_id = trim($part->id, "<>");
+        }
 
-            }
+        $a_stmt = $pdo->prepare("INSERT INTO attachments (email_id, file_name, file_path, content_id) VALUES (?, ?, ?, ?)");
+        $a_stmt->execute([
+            $email_id,
+            $filename,
+            $web_file_path,
+            $content_id
+        ]);
+        echo "Inserted attachment: $filename into DB<br>";
+    }
+}
 
 
 
             }
         }
-        echo "Saving attachment: $filename<br>";
+        
 
         // Recurse for sub-parts
         if (isset($part->parts)) {
