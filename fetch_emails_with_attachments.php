@@ -1,7 +1,5 @@
 <?php
-ini_set('display_errors', 1);
-ini_set('display_startup_errors', 1);
-error_reporting(E_ALL);
+
 
 // Email config
 $hostname = '{mail.oojeema.com:993/imap/ssl}INBOX';
@@ -140,8 +138,8 @@ function save_attachments_recursive($parts, $inbox, $msgno, $email_id, $upload_d
         if (isset($part->parts)) {
             save_attachments_recursive($part->parts, $inbox, $msgno, $email_id, $upload_dir, $pdo, $partnum);
         }
-    }
-}
+    //}
+//}
 
 // ==========
 // MAIN LOGIC
