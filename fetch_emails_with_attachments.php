@@ -13,58 +13,88 @@ $db_name = 'dev6ourwebprojec_oojeema_support';
 
 
 
-$upload_dir = __DIR__ . '/uploads/'; // Must exist and be writable
+$upload_dir = __DIR__ . '/uploads/';      // Make sure this folder exists and is writable (755 or 775)
+// ===================
+//  CONFIGURATION END
+// ===================
 
-// Helper for filename decoding (RFC2231 and MIME encoded)
-function decode_filename($value) {
-    // Decode RFC 2231 (e.g., filename*=UTF-8''encoded)
-    if (preg_match("/^UTF-8''(.+)/", $value, $matches)) {
-        $value = rawurldecode($matches[1]);
-    }
-    // Decode MIME encoded-words (e.g., =?UTF-8?Q?...?=)
-    if (preg_match('/=\?(.+?)\?(Q|B)\?(.+)\?=/i', $value)) {
-        $value = mb_decode_mimeheader($value);
-    }
-    return $value;
+// ==========
+// CONNECT DB
+// ==========
+try {
+    $pdo = new PDO("mysql:host=$db_host;dbname=$db_name;charset=utf8mb4", $db_user, $db_pass);
+    $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
+} catch (PDOException $e) {
+    die("DB Connection failed: " . $e->getMessage());
 }
 
-// Recursive attachment/inline image extractor with correct part numbering
-function save_attachments_recursive($parts, $inbox, $msgno, $email_id, $upload_dir, $pdo, $prefix = '', &$cid_map = []) {
+// ================
+// CONNECT TO IMAP
+// ================
+$inbox = @imap_open($hostname, $username, $password);
+if (!$inbox) {
+    die('IMAP connection failed: ' . imap_last_error());
+}
+
+// ============
+// SEARCH EMAILS
+// ============
+$emails = imap_search($inbox, 'UNSEEN', SE_UID, 'UTF-8');
+
+// ==============
+// BODY EXTRACTOR
+// ==============
+function get_mail_body($inbox, $msgno, $structure = false, $partNum = '') {
+    if (!$structure) $structure = imap_fetchstructure($inbox, $msgno);
+
+    if (!isset($structure->parts)) {
+        // Single-part: just get body
+        $body = imap_fetchbody($inbox, $msgno, $partNum ? $partNum : 1);
+        // Decode as needed
+        if ($structure->encoding == 3) { // BASE64
+            $body = base64_decode($body);
+        } elseif ($structure->encoding == 4) { // QUOTED-PRINTABLE
+            $body = quoted_printable_decode($body);
+        }
+        return $body;
+    }
+
+    // Multipart: look for HTML first, else plain
+    $result = '';
+    foreach ($structure->parts as $i => $part) {
+        $subPartNum = $partNum ? $partNum . '.' . ($i + 1) : (string)($i + 1);
+        if ($part->type == 0) { // text: 0=plain/html
+            $body = imap_fetchbody($inbox, $msgno, $subPartNum);
+            if ($part->encoding == 3) $body = base64_decode($body);
+            elseif ($part->encoding == 4) $body = quoted_printable_decode($body);
+            if (strtolower($part->subtype) == 'html') {
+                return $body; // Prefer HTML
+            }
+            if (strtolower($part->subtype) == 'plain' && !$result) {
+                $result = $body; // Save plain if no HTML found yet
+            }
+        } elseif (isset($part->parts)) {
+            // Recurse for nested multiparts (e.g. "alternative", "related", "mixed")
+            $body = get_mail_body($inbox, $msgno, $part, $subPartNum);
+            if ($body) return $body;
+        }
+    }
+    return $result;
+}
+
+
+// ===============
+// ATTACHMENT SAVE
+// ===============
+function save_attachments_recursive($parts, $inbox, $msgno, $email_id, $upload_dir, $pdo, $prefix = '') {
     if (!is_array($parts)) return;
     foreach ($parts as $i => $part) {
         $partnum = $prefix ? $prefix . '.' . ($i+1) : (string)($i+1);
 
-        // Get filename (check dparameters first, then parameters)
-        $filename = '';
-        if (isset($part->dparameters) && is_array($part->dparameters)) {
-            foreach ($part->dparameters as $param) {
-                if (strtolower($param->attribute) === 'filename*' || strtolower($param->attribute) === 'filename') {
-                    $filename = decode_filename($param->value);
-                    break;
-                }
-            }
-        }
-        if (!$filename && isset($part->parameters) && is_array($part->parameters)) {
-            foreach ($part->parameters as $param) {
-                if (strtolower($param->attribute) === 'name' || strtolower($param->attribute) === 'filename') {
-                    $filename = decode_filename($param->value);
-                    break;
-                }
-            }
-        }
-        // If no filename but this is an image, generate a name
-        if (!$filename && isset($part->type) && $part->type == 5) {
-            $ext = isset($part->subtype) ? strtolower($part->subtype) : 'img';
-            if (isset($part->id)) {
-                $cid = trim($part->id, "<>");
-                $filename = 'cid_' . $cid . '.' . $ext;
-            } else {
-                $filename = 'inline_img_' . uniqid() . '.' . $ext;
-            }
-        }
-
-        // Save any image or part with a filename
-        if ($filename && (isset($part->type) && $part->type == 5) || ($filename && $filename !== '')) {
+        // Save all images and attachments with a filename
+        if (isset($part->type) && ($part->type == 5 || $part->type == 3 || $part->type == 4)) {
+            $ext = isset($part->subtype) ? strtolower($part->subtype) : 'dat';
+            $filename = 'attachment_' . uniqid() . '.' . $ext;
             $filename = preg_replace('/[^A-Za-z0-9_\-\.]/', '_', $filename);
             $file_path = $upload_dir . uniqid() . '_' . $filename;
 
@@ -74,7 +104,6 @@ function save_attachments_recursive($parts, $inbox, $msgno, $email_id, $upload_d
             } elseif ($part->encoding == 4) { // QUOTED-PRINTABLE
                 $attachment = quoted_printable_decode($attachment);
             }
-            // Prevent saving empty attachments (just in case)
             if ($attachment && strlen($attachment) > 100) {
                 file_put_contents($file_path, $attachment);
 
@@ -86,50 +115,34 @@ function save_attachments_recursive($parts, $inbox, $msgno, $email_id, $upload_d
                     $file_path
                 ]);
             }
-
-            // Map CID to file if needed
-            if (isset($part->id)) {
-                $cid = trim($part->id, "<>");
-                $cid_map[$cid] = $file_path;
-            }
         }
-
-        // Recurse for sub-parts (handle nesting, crucial for inline images)
+        // Recurse for sub-parts
         if (isset($part->parts)) {
-            save_attachments_recursive($part->parts, $inbox, $msgno, $email_id, $upload_dir, $pdo, $partnum, $cid_map);
+            save_attachments_recursive($part->parts, $inbox, $msgno, $email_id, $upload_dir, $pdo, $partnum);
         }
     }
 }
 
-try {
-    $pdo = new PDO("mysql:host=$db_host;dbname=$db_name;charset=utf8mb4", $db_user, $db_pass);
-    $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
-} catch (PDOException $e) {
-    die("DB Connection failed: " . $e->getMessage());
-}
-
-$inbox = @imap_open($hostname, $username, $password);
-if (!$inbox) {
-    die('IMAP connection failed: ' . imap_last_error());
-}
-
-$emails = imap_search($inbox, 'UNSEEN', SE_UID, 'UTF-8');
-
+// ==========
+// MAIN LOGIC
+// ==========
 if ($emails) {
     $saved = 0;
     foreach ($emails as $uid) {
         $msgno = imap_msgno($inbox, $uid);
         $header = imap_headerinfo($inbox, $msgno);
+        $structure = imap_fetchstructure($inbox, $msgno);
+
         $subject = isset($header->subject) ? $header->subject : '(No Subject)';
         $from_email = (isset($header->from[0]->mailbox) && isset($header->from[0]->host))
             ? $header->from[0]->mailbox . '@' . $header->from[0]->host
             : '';
         $from_name = isset($header->from[0]->personal) ? $header->from[0]->personal : '';
-        $body = imap_body($inbox, $msgno);
+        $body = get_mail_body($inbox, $msgno, $structure);  // <--- Use the clean body function!
         $date = isset($header->date) ? date('Y-m-d H:i:s', strtotime($header->date)) : date('Y-m-d H:i:s');
         $email_uid = $uid;
 
-        // --- Threading Logic ---
+        // --- Threading Logic (leave as is) ---
         $message_id = isset($header->message_id) ? trim($header->message_id) : null;
         $in_reply_to = isset($header->in_reply_to) ? trim($header->in_reply_to) : null;
 
@@ -143,7 +156,7 @@ if ($emails) {
             }
         }
 
-        // Insert email (or update thread if already exists)
+        // --- Save Email to Database ---
         $stmt = $pdo->prepare("
             INSERT INTO emails (
                 email_uid, sender_email, sender_name, subject, body, received_at, is_support, message_id, thread_id
@@ -161,7 +174,7 @@ if ($emails) {
             $thread_id
         ]);
 
-        // Get email_id for attachments
+        // --- Get email_id for attachments ---
         $email_id = $pdo->lastInsertId();
         if ($email_id == 0) {
             $id_stmt = $pdo->prepare("SELECT id FROM emails WHERE email_uid = ?");
@@ -170,15 +183,13 @@ if ($emails) {
             $email_id = $row ? $row['id'] : null;
         }
 
-        // --- Save ALL attachments and inline images, even CID-only, with correct part numbers
-        $structure = imap_fetchstructure($inbox, $msgno);
-        $cid_map = [];
+        // --- Save attachments and images
         if (isset($structure->parts) && count($structure->parts)) {
-            save_attachments_recursive($structure->parts, $inbox, $msgno, $email_id, $upload_dir, $pdo, '', $cid_map);
+            save_attachments_recursive($structure->parts, $inbox, $msgno, $email_id, $upload_dir, $pdo, '');
         }
         $saved++;
     }
-    echo "Processed $saved email(s), with all attachments and inline images (including CID) saved if present!";
+    echo "Processed $saved email(s).";
 } else {
     echo "No unread emails found!";
 }
