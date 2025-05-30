@@ -119,9 +119,10 @@ function save_attachments_recursive($parts, $inbox, $msgno, $email_id, $upload_d
                     $a_stmt->execute([
                         $email_id,
                         $filename,
-                        $file_path,
+                        $web_path,     // <- web-accessible path
                         $content_id
                     ]);
+
 
             }
         }
